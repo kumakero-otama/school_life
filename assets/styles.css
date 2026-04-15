@@ -112,7 +112,8 @@ h1 {
 .empty-state,
 .auth-copy,
 .auth-hint,
-.auth-error {
+.auth-error,
+.flash-message {
   color: var(--muted);
   line-height: 1.7;
 }
@@ -376,6 +377,20 @@ h1 {
 .empty-row {
   text-align: center;
   color: var(--muted);
+}
+
+.flash-message {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 253, 248, 0.92);
+}
+
+.flash-error {
+  color: #8f2d2d;
+  border-color: rgba(143, 45, 45, 0.22);
+  background: rgba(255, 239, 239, 0.88);
 }
 
 .empty-state {

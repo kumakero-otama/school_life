@@ -2,6 +2,7 @@ const STORAGE_PREFIX = "school-life-checks:";
 const AUTH_STORAGE_KEY = "school-life-auth";
 const PASSWORD_HASH = "43bf9bce5e0fe12801dfaba71b702c4956c9761ed722a43bc80d7d3c6f211d88";
 const DEFAULT_PASSWORD_HINT = "初期パスワードは school-life です。公開前に app.js 内のハッシュ変更をおすすめします。";
+const SHARED_CONFIG = window.SCHOOL_LIFE_CONFIG?.sharedStorage || {};
 const pageUiState = new Map();
 
 function escapeHtml(value) {
@@ -119,6 +120,101 @@ function readStorage(storageKey) {
 
 function writeStorage(storageKey, value) {
   localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function isSharedStorageEnabled() {
+  return Boolean(
+    SHARED_CONFIG.enabled &&
+      SHARED_CONFIG.provider === "supabase" &&
+      SHARED_CONFIG.projectUrl &&
+      SHARED_CONFIG.anonKey &&
+      SHARED_CONFIG.table
+  );
+}
+
+function getSharedHeaders() {
+  return {
+    apikey: SHARED_CONFIG.anonKey,
+    Authorization: `Bearer ${SHARED_CONFIG.anonKey}`,
+    "Content-Type": "application/json",
+  };
+}
+
+async function readPageState(pageSlug) {
+  if (!isSharedStorageEnabled()) {
+    return null;
+  }
+
+  const url = new URL(`${SHARED_CONFIG.projectUrl}/rest/v1/${SHARED_CONFIG.table}`);
+  url.searchParams.set("page_slug", `eq.${pageSlug}`);
+  url.searchParams.set("select", "item_id,purchase,prepare");
+
+  const response = await fetch(url, {
+    headers: getSharedHeaders(),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("共有データの読み込みに失敗しました。");
+  }
+
+  const rows = await response.json();
+  return Object.fromEntries(
+    rows.map((row) => [
+      row.item_id,
+      {
+        purchase: Boolean(row.purchase),
+        prepare: Boolean(row.prepare),
+      },
+    ])
+  );
+}
+
+async function writePageItemState(pageSlug, itemId, value) {
+  if (!isSharedStorageEnabled()) {
+    return;
+  }
+
+  const url = new URL(`${SHARED_CONFIG.projectUrl}/rest/v1/${SHARED_CONFIG.table}`);
+  url.searchParams.set("on_conflict", "page_slug,item_id");
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      ...getSharedHeaders(),
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify([
+      {
+        page_slug: pageSlug,
+        item_id: itemId,
+        purchase: Boolean(value.purchase),
+        prepare: Boolean(value.prepare),
+      },
+    ]),
+  });
+
+  if (!response.ok) {
+    throw new Error("共有データの保存に失敗しました。");
+  }
+}
+
+async function clearPageState(pageSlug) {
+  if (!isSharedStorageEnabled()) {
+    return;
+  }
+
+  const url = new URL(`${SHARED_CONFIG.projectUrl}/rest/v1/${SHARED_CONFIG.table}`);
+  url.searchParams.set("page_slug", `eq.${pageSlug}`);
+
+  const response = await fetch(url, {
+    method: "DELETE",
+    headers: getSharedHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error("共有データのリセットに失敗しました。");
+  }
 }
 
 function getUiState(pageKey) {
@@ -279,6 +375,9 @@ function renderHome(pages) {
 }
 
 function renderChecklist(markdown) {
+  const sharedStatus = document.body.dataset.sharedStatus || "local";
+  const flashMessage = document.body.dataset.flashMessage || "";
+  const flashTone = document.body.dataset.flashTone || "";
   const body = document.body;
   const title = body.dataset.pageTitle || "チェックリスト";
   const source = body.dataset.pageSource || "./list.md";
@@ -299,12 +398,17 @@ function renderChecklist(markdown) {
   const metrics = collectMetrics(sections, state);
 
   mount.innerHTML = `
+    ${
+      flashMessage
+        ? `<p class="flash-message ${flashTone === "error" ? "flash-error" : ""}">${escapeHtml(flashMessage)}</p>`
+        : ""
+    }
     <section class="panel">
       <div class="summary-row">
         <div>
           <p class="section-label">Overview</p>
           <h2>進み具合</h2>
-          <p class="summary-copy">購入と準備をそれぞれ保存できます。チェックはこのブラウザに残ります。</p>
+          <p class="summary-copy">${getSummaryCopy(sharedStatus)}</p>
         </div>
         <button type="button" class="ghost-button" id="reset-checks">このページのチェックをリセット</button>
       </div>
@@ -329,20 +433,29 @@ function renderChecklist(markdown) {
   `;
 
   mount.querySelectorAll("input[type='checkbox']").forEach((input) => {
-    input.addEventListener("change", (event) => {
+    input.addEventListener("change", async (event) => {
       const target = event.currentTarget;
       const itemId = target.dataset.itemId;
       const field = target.dataset.field;
+      const currentState = readStorage(storageKey);
       const nextState = {
-        ...readStorage(storageKey),
+        ...currentState,
         [itemId]: {
-          ...(readStorage(storageKey)[itemId] || {}),
+          ...(currentState[itemId] || {}),
           [field]: target.checked,
         },
       };
 
       writeStorage(storageKey, nextState);
-      renderChecklist(markdown);
+      try {
+        await writePageItemState(slug, itemId, nextState[itemId]);
+        renderChecklist(markdown);
+      } catch (error) {
+        target.checked = !(target.checked);
+        writeStorage(storageKey, currentState);
+        renderChecklist(markdown);
+        showPageMessage(error.message, "error");
+      }
     });
   });
 
@@ -366,12 +479,35 @@ function renderChecklist(markdown) {
     });
   });
 
-  document.querySelector("#reset-checks")?.addEventListener("click", () => {
+  document.querySelector("#reset-checks")?.addEventListener("click", async () => {
+    const previousState = readStorage(storageKey);
     localStorage.removeItem(storageKey);
-    renderChecklist(markdown);
+    try {
+      await clearPageState(slug);
+      renderChecklist(markdown);
+    } catch (error) {
+      writeStorage(storageKey, previousState);
+      showPageMessage(error.message, "error");
+      renderChecklist(markdown);
+    }
   });
 
   document.querySelector("#source-path").textContent = source;
+  document.body.dataset.flashMessage = "";
+  document.body.dataset.flashTone = "";
+}
+
+function getSummaryCopy(sharedStatus) {
+  if (sharedStatus === "shared") {
+    return "購入と準備は共有保存されます。別の利用者が更新した内容も、このページを開き直すと反映されます。";
+  }
+  return "購入と準備をそれぞれ保存できます。いまはこのブラウザ内だけに保存されます。";
+}
+
+function showPageMessage(message, tone) {
+  if (!message) return;
+  document.body.dataset.flashMessage = message;
+  document.body.dataset.flashTone = tone || "";
 }
 
 function renderSection(section, state, pageKey, sectionIndex) {
@@ -572,8 +708,22 @@ async function bootstrap() {
 
   if (view === "checklist") {
     const source = document.body.dataset.pageSource || "./list.md";
+    const slug = document.body.dataset.pageSlug || slugify(document.body.dataset.pageTitle || "page");
     const response = await fetch(source, { cache: "no-store" });
     const markdown = await response.text();
+    let sharedStatus = "local";
+
+    if (isSharedStorageEnabled()) {
+      try {
+        const remoteState = await readPageState(slug);
+        writeStorage(`${STORAGE_PREFIX}${slug}`, remoteState || {});
+        sharedStatus = "shared";
+      } catch (error) {
+        showPageMessage(`${error.message} ローカル保存モードで表示しています。`, "error");
+      }
+    }
+
+    document.body.dataset.sharedStatus = sharedStatus;
     renderChecklist(markdown);
   }
 }
