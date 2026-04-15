@@ -210,7 +210,10 @@ function showAuthOverlay() {
 
     if (redirect) {
       window.location.href = redirect;
+      return;
     }
+
+    bootstrap();
   });
 
   requestAnimationFrame(() => input.focus());
