@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>school_life</title>
+    <link rel="stylesheet" href="./assets/styles.css">
+  </head>
+  <body data-view="home" data-home-path="./">
+    <div class="page-shell">
+      <header class="hero">
+        <div class="page-top">
+          <div>
+            <p class="eyebrow">School Life Checklist</p>
+            <h1>学校生活チェックリスト</h1>
+            <p class="hero-copy">
+              学年・学期・号ごとの持ち物や提出物を、GitHub Pages 上で確認できる一覧です。
+              チェック状態はこのブラウザに保存されます。
+            </p>
+            <p class="panel-note">
+              ベース資料:
+              <a class="inline-link" href="https://notebooklm.google.com/notebook/1388645f-5c58-4b14-b935-a167b559c3d9" target="_blank" rel="noreferrer">NotebookLM を開く</a>
+            </p>
+          </div>
+          <button type="button" class="ghost-button" id="logout-button" hidden>ログアウト</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="section-label">Pages</p>
+              <h2>公開ページ</h2>
+            </div>
+            <p class="panel-note">新しい号を追加するときは `data/pages.json` に1件追加します。</p>
+          </div>
+          <div id="page-list" class="page-grid" aria-live="polite"></div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./assets/app.js"></script>
+  </body>
+</html>

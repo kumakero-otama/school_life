@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>セキュリティ課題メモ | school_life</title>
+    <link rel="stylesheet" href="../../assets/styles.css">
+  </head>
+  <body
+    data-view="checklist"
+    data-page-title="セキュリティ課題メモ"
+    data-page-slug="security-checklist"
+    data-page-source="./list.md"
+    data-home-path="../../"
+  >
+    <div class="page-shell">
+      <header class="hero page-header">
+        <div class="page-top">
+          <div>
+            <p class="eyebrow">Security Notes</p>
+            <h1>セキュリティ課題メモ</h1>
+            <p class="hero-copy">
+              現在の GitHub Pages 構成にある問題点と、今後の対応案を整理するためのチェックページです。
+            </p>
+          </div>
+          <div class="status-row">
+            <a class="back-link" href="../../">トップへ戻る</a>
+            <button type="button" class="ghost-button" id="logout-button" hidden>ログアウト</button>
+          </div>
+        </div>
+        <p class="panel-note">読込元: <span id="source-path">./list.md</span></p>
+      </header>
+
+      <main id="app" aria-live="polite"></main>
+    </div>
+
+    <script type="module" src="../../assets/app.js"></script>
+  </body>
+</html>
