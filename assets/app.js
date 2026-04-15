@@ -2,6 +2,7 @@ const STORAGE_PREFIX = "school-life-checks:";
 const AUTH_STORAGE_KEY = "school-life-auth";
 const PASSWORD_HASH = "43bf9bce5e0fe12801dfaba71b702c4956c9761ed722a43bc80d7d3c6f211d88";
 const DEFAULT_PASSWORD_HINT = "初期パスワードは school-life です。公開前に app.js 内のハッシュ変更をおすすめします。";
+const pageUiState = new Map();
 
 function escapeHtml(value) {
   return String(value)
@@ -118,6 +119,21 @@ function readStorage(storageKey) {
 
 function writeStorage(storageKey, value) {
   localStorage.setItem(storageKey, JSON.stringify(value));
+}
+
+function getUiState(pageKey) {
+  if (!pageUiState.has(pageKey)) {
+    pageUiState.set(pageKey, {});
+  }
+  return pageUiState.get(pageKey);
+}
+
+function updateSectionUiState(pageKey, sectionKey, patch) {
+  const pageState = getUiState(pageKey);
+  pageState[sectionKey] = {
+    ...(pageState[sectionKey] || {}),
+    ...patch,
+  };
 }
 
 async function sha256(value) {
@@ -268,6 +284,7 @@ function renderChecklist(markdown) {
   const source = body.dataset.pageSource || "./list.md";
   const slug = body.dataset.pageSlug || slugify(title) || "page";
   const storageKey = `${STORAGE_PREFIX}${slug}`;
+  const pageKey = slug;
   const sections = parseMarkdownTables(markdown);
   const state = readStorage(storageKey);
 
@@ -307,7 +324,7 @@ function renderChecklist(markdown) {
       </div>
     </section>
     <section class="section-list">
-      ${sections.map((section) => renderSection(section, state)).join("")}
+      ${sections.map((section, sectionIndex) => renderSection(section, state, pageKey, sectionIndex)).join("")}
     </section>
   `;
 
@@ -329,6 +346,26 @@ function renderChecklist(markdown) {
     });
   });
 
+  mount.querySelectorAll("[data-sort-section]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sectionKey = button.dataset.sortSection;
+      const fieldIndex = Number(button.dataset.sortField);
+      const current = getUiState(pageKey)[sectionKey] || {};
+      const isSameField = current.sortField === fieldIndex;
+      const nextDirection = !isSameField ? "asc" : current.sortDirection === "asc" ? "desc" : "asc";
+      updateSectionUiState(pageKey, sectionKey, { sortField: fieldIndex, sortDirection: nextDirection });
+      renderChecklist(markdown);
+    });
+  });
+
+  mount.querySelectorAll("[data-filter-section]").forEach((select) => {
+    select.addEventListener("change", (event) => {
+      const target = event.currentTarget;
+      updateSectionUiState(pageKey, target.dataset.filterSection, { filterValue: target.value });
+      renderChecklist(markdown);
+    });
+  });
+
   document.querySelector("#reset-checks")?.addEventListener("click", () => {
     localStorage.removeItem(storageKey);
     renderChecklist(markdown);
@@ -337,7 +374,12 @@ function renderChecklist(markdown) {
   document.querySelector("#source-path").textContent = source;
 }
 
-function renderSection(section, state) {
+function renderSection(section, state, pageKey, sectionIndex) {
+  const sectionKey = `${slugify(section.title) || "section"}-${sectionIndex}`;
+  const uiState = getUiState(pageKey)[sectionKey] || {};
+  const filterFieldIndex = getFilterFieldIndex(section);
+  const filterOptions = filterFieldIndex >= 0 ? getFilterOptions(section, filterFieldIndex) : [];
+  const processedRows = applySectionView(section.rows, uiState, filterFieldIndex);
   const sectionMetrics = section.rows.reduce(
     (accumulator, row) => {
       const rowState = state[row.id] || {};
@@ -355,61 +397,149 @@ function renderSection(section, state) {
         <div>
           <p class="section-label">Section</p>
           <h3>${escapeHtml(section.title)}</h3>
+          <div class="section-tools">
+            ${
+              filterFieldIndex >= 0
+                ? `
+                  <label class="filter-group">
+                    <span>${escapeHtml(section.rows[0].fields[filterFieldIndex].label)}で絞り込み</span>
+                    <select data-filter-section="${escapeHtml(sectionKey)}">
+                      <option value="">すべて</option>
+                      ${filterOptions
+                        .map(
+                          (option) => `
+                            <option value="${escapeHtml(option)}" ${uiState.filterValue === option ? "selected" : ""}>${escapeHtml(option)}</option>
+                          `
+                        )
+                        .join("")}
+                    </select>
+                  </label>
+                `
+                : ""
+            }
+          </div>
         </div>
         <div class="section-progress">
           <span>購入 ${sectionMetrics.purchaseDone}/${sectionMetrics.items}</span>
           <span>準備 ${sectionMetrics.prepareDone}/${sectionMetrics.items}</span>
         </div>
       </div>
-      <div class="item-list">
-        ${section.rows.map((row) => renderRow(row, state[row.id] || {})).join("")}
+      <div class="list-table-wrap">
+        <table class="list-table">
+          <thead>
+            <tr>
+              ${section.rows[0].fields
+                .map(
+                  (field, fieldIndex) => `
+                    <th>
+                      <button
+                        type="button"
+                        class="sort-button"
+                        data-sort-section="${escapeHtml(sectionKey)}"
+                        data-sort-field="${fieldIndex}"
+                      >
+                        <span>${escapeHtml(field.label)}</span>
+                        <span class="sort-indicator">${getSortIndicator(uiState, fieldIndex)}</span>
+                      </button>
+                    </th>
+                  `
+                )
+                .join("")}
+              <th>
+                <button type="button" class="sort-button" data-sort-section="${escapeHtml(sectionKey)}" data-sort-field="-1">
+                  <span>${escapeHtml(section.rows[0].purchaseLabel)}</span>
+                  <span class="sort-indicator">${getSortIndicator(uiState, -1)}</span>
+                </button>
+              </th>
+              <th>
+                <button type="button" class="sort-button" data-sort-section="${escapeHtml(sectionKey)}" data-sort-field="-2">
+                  <span>${escapeHtml(section.rows[0].prepareLabel)}</span>
+                  <span class="sort-indicator">${getSortIndicator(uiState, -2)}</span>
+                </button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              processedRows.length
+                ? processedRows.map((row) => renderRow(row, state[row.id] || {})).join("")
+                : `<tr><td colspan="${section.rows[0].fields.length + 2}" class="empty-row">条件に合う項目はありません。</td></tr>`
+            }
+          </tbody>
+        </table>
       </div>
     </article>
   `;
 }
 
+function getFilterFieldIndex(section) {
+  const labels = section.rows[0]?.fields.map((field) => field.label) || [];
+  const priority = ["教科", "分類", "項目"];
+  for (const label of priority) {
+    const index = labels.indexOf(label);
+    if (index >= 0) return index;
+  }
+  return labels.length ? 0 : -1;
+}
+
+function getFilterOptions(section, filterFieldIndex) {
+  return [...new Set(section.rows.map((row) => row.fields[filterFieldIndex]?.value || "").filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b, "ja")
+  );
+}
+
+function applySectionView(rows, uiState, filterFieldIndex) {
+  let result = [...rows];
+
+  if (filterFieldIndex >= 0 && uiState.filterValue) {
+    result = result.filter((row) => (row.fields[filterFieldIndex]?.value || "") === uiState.filterValue);
+  }
+
+  if (typeof uiState.sortField === "number") {
+    result.sort((left, right) => compareRows(left, right, uiState.sortField, uiState.sortDirection || "asc"));
+  }
+
+  return result;
+}
+
+function compareRows(left, right, sortField, sortDirection) {
+  const direction = sortDirection === "desc" ? -1 : 1;
+  const leftValue = getSortableValue(left, sortField);
+  const rightValue = getSortableValue(right, sortField);
+  return leftValue.localeCompare(rightValue, "ja", { numeric: true, sensitivity: "base" }) * direction;
+}
+
+function getSortableValue(row, sortField) {
+  if (sortField === -1) return row.purchase ? "1" : "0";
+  if (sortField === -2) return row.prepare ? "1" : "0";
+  return row.fields[sortField]?.value || "";
+}
+
+function getSortIndicator(uiState, fieldIndex) {
+  if (uiState.sortField !== fieldIndex) return "↕";
+  return uiState.sortDirection === "desc" ? "↓" : "↑";
+}
+
 function renderRow(row, rowState) {
   const purchaseChecked = rowState.purchase ?? row.purchase;
   const prepareChecked = rowState.prepare ?? row.prepare;
-  const titleField = row.fields[1]?.value || row.fields[0]?.value || "項目";
-  const noteField = row.fields.at(-1);
-  const metaFields = row.fields.filter((field, index) => {
-    const isTitleField = row.fields[1] && index === 1;
-    const isNoteField = noteField && index === row.fields.length - 1;
-    return !isTitleField && !isNoteField;
-  });
 
   return `
-    <article class="item-card">
-      <div class="item-grid">
-        <div class="item-main">
-          <h4 class="item-title">${escapeHtml(titleField)}</h4>
-          <div class="meta-row">
-            ${metaFields
-              .map(
-                (field) => `
-                  <span class="meta-pill">
-                    <strong>${escapeHtml(field.label)}</strong>
-                    <span>${escapeHtml(field.value || "-")}</span>
-                  </span>
-                `
-              )
-              .join("")}
-          </div>
-          ${noteField && noteField.value ? `<p class="item-notes">${escapeHtml(noteField.value)}</p>` : ""}
-        </div>
-        <div class="status-row">
-          <label class="check-toggle">
-            <input type="checkbox" data-item-id="${escapeHtml(row.id)}" data-field="purchase" ${purchaseChecked ? "checked" : ""}>
-            <span>${escapeHtml(row.purchaseLabel)}</span>
-          </label>
-          <label class="check-toggle">
-            <input type="checkbox" data-item-id="${escapeHtml(row.id)}" data-field="prepare" ${prepareChecked ? "checked" : ""}>
-            <span>${escapeHtml(row.prepareLabel)}</span>
-          </label>
-        </div>
-      </div>
-    </article>
+    <tr>
+      ${row.fields.map((field) => `<td>${escapeHtml(field.value || "")}</td>`).join("")}
+      <td class="check-cell">
+        <label class="check-toggle compact-toggle">
+          <input type="checkbox" data-item-id="${escapeHtml(row.id)}" data-field="purchase" ${purchaseChecked ? "checked" : ""}>
+          <span>${escapeHtml(row.purchaseLabel)}</span>
+        </label>
+      </td>
+      <td class="check-cell">
+        <label class="check-toggle compact-toggle">
+          <input type="checkbox" data-item-id="${escapeHtml(row.id)}" data-field="prepare" ${prepareChecked ? "checked" : ""}>
+          <span>${escapeHtml(row.prepareLabel)}</span>
+        </label>
+      </td>
+    </tr>
   `;
 }
 
