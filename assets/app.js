@@ -409,8 +409,17 @@ function renderChecklist(markdown) {
           <p class="section-label">Overview</p>
           <h2>進み具合</h2>
           <p class="summary-copy">${getSummaryCopy(sharedStatus)}</p>
+          <div class="status-pills">
+            <span class="status-pill ${sharedStatus === "shared" ? "status-pill-shared" : ""}">
+              ${sharedStatus === "shared" ? "共有保存中" : "ローカル保存中"}
+            </span>
+            ${isSharedStorageEnabled() ? '<span class="status-pill">Supabase</span>' : ""}
+          </div>
         </div>
-        <button type="button" class="ghost-button" id="reset-checks">このページのチェックをリセット</button>
+        <div class="status-row">
+          <button type="button" class="ghost-button" id="reload-shared">最新状態を再読込</button>
+          <button type="button" class="ghost-button" id="reset-checks">このページのチェックをリセット</button>
+        </div>
       </div>
       <div class="summary-grid">
         <article class="summary-card">
@@ -477,6 +486,25 @@ function renderChecklist(markdown) {
       updateSectionUiState(pageKey, target.dataset.filterSection, { filterValue: target.value });
       renderChecklist(markdown);
     });
+  });
+
+  document.querySelector("#reload-shared")?.addEventListener("click", async () => {
+    if (!isSharedStorageEnabled()) {
+      showPageMessage("共有保存はまだ有効化されていません。", "error");
+      renderChecklist(markdown);
+      return;
+    }
+
+    try {
+      const remoteState = await readPageState(slug);
+      writeStorage(storageKey, remoteState || {});
+      document.body.dataset.sharedStatus = "shared";
+      showPageMessage("共有データを再読込しました。", "");
+      renderChecklist(markdown);
+    } catch (error) {
+      showPageMessage(error.message, "error");
+      renderChecklist(markdown);
+    }
   });
 
   document.querySelector("#reset-checks")?.addEventListener("click", async () => {
